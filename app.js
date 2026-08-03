@@ -603,9 +603,19 @@ function renderCompletionChart(rows) {
     memberMap[uid].d1Done  += r.d1Done;
     memberMap[uid].d1Total += (r.totalItems || TOTAL_ITEMS);
   });
+  // Real-time, no-rounding-up completion: 100% ONLY when every item is
+  // actually filled out, 0% only when none are. Anything partial floors so
+  // a nearly-done group never falsely reads as complete (e.g. 199/200 → 99%,
+  // not 100%), and a single filled item never rounds down to 0%.
+  const exactPct = (done, total) => {
+    if (total <= 0) return 0;
+    if (done >= total) return 100;
+    if (done <= 0) return 0;
+    return Math.max(1, Math.min(99, Math.floor((done / total) * 100)));
+  };
   Object.values(memberMap).forEach(m => {
-    m.d5Pct  = m.d5Total > 0 ? Math.round((m.d5Done / m.d5Total) * 100) : 0;
-    m.d1Pct  = m.d1Total > 0 ? Math.round((m.d1Done / m.d1Total) * 100) : 0;
+    m.d5Pct  = exactPct(m.d5Done, m.d5Total);
+    m.d1Pct  = exactPct(m.d1Done, m.d1Total);
     // Overall rate is based on D-1 inputs alone for every user.
     m.avgPct = m.d1Pct;
   });
@@ -629,8 +639,8 @@ function renderCompletionChart(rows) {
     const d5Total = combinedList.reduce((s, m) => s + m.d5Total, 0);
     const d1Done = combinedList.reduce((s, m) => s + m.d1Done, 0);
     const d1Total = combinedList.reduce((s, m) => s + m.d1Total, 0);
-    const d5Pct = d5Total > 0 ? Math.round((d5Done / d5Total) * 100) : 0;
-    const d1Pct = d1Total > 0 ? Math.round((d1Done / d1Total) * 100) : 0;
+    const d5Pct = exactPct(d5Done, d5Total);
+    const d1Pct = exactPct(d1Done, d1Total);
     return {
       name: tl.name || tl.username, uid: tl.uid,
       d5Pct, d1Pct, avgPct: d1Pct, // overall rate is D-1-based
@@ -649,8 +659,8 @@ function renderCompletionChart(rows) {
     const d5Total = unassignedMembers.reduce((s, m) => s + m.d5Total, 0);
     const d1Done = unassignedMembers.reduce((s, m) => s + m.d1Done, 0);
     const d1Total = unassignedMembers.reduce((s, m) => s + m.d1Total, 0);
-    const d5Pct = d5Total > 0 ? Math.round((d5Done / d5Total) * 100) : 0;
-    const d1Pct = d1Total > 0 ? Math.round((d1Done / d1Total) * 100) : 0;
+    const d5Pct = exactPct(d5Done, d5Total);
+    const d1Pct = exactPct(d1Done, d1Total);
     leadGroups.push({
       name: 'Unassigned (no team lead)', uid: '_unassigned',
       d5Pct, d1Pct, avgPct: d1Pct,
