@@ -566,6 +566,57 @@ function renderDdayBanner() {
     </div>`;
 }
 
+// ═════════════════════════════════════════════════════════════
+//  UPCOMING CAMPAIGN ALERT BANNER
+//  "A campaign phase is coming up on the calendar and nobody has
+//  created its checklist yet" — see getUpcomingCampaignAlerts().
+// ═════════════════════════════════════════════════════════════
+function renderCampaignAlertBanner() {
+  const el = document.getElementById('campaign-alert-banner');
+  if (!el) return;
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  if (!isAdmin) { el.style.display = 'none'; return; }
+
+  const alerts = getUpcomingCampaignAlerts();
+  if (alerts.length === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  el.style.display = 'block';
+  el.innerHTML = alerts.map(a => {
+    const info = _CANON_PHASE_INFO[a.phase] || { uiValue: '', label: 'Campaign' };
+    let cls, msg;
+    if (a.daysUntil <= 0)      { cls = 'camp-alert-red';   msg = '🔴 STARTS TODAY'; }
+    else if (a.daysUntil === 1){ cls = 'camp-alert-red';   msg = '🔴 STARTS TOMORROW'; }
+    else if (a.daysUntil <= 5) { cls = 'camp-alert-amber'; msg = `⚠️ IN ${a.daysUntil} DAYS`; }
+    else                       { cls = 'camp-alert-green'; msg = `📅 IN ${a.daysUntil} DAYS`; }
+    const monthLabel = `${_MONTH_LABELS[a.month]} ${a.year}`;
+    const regionsStr = a.regions.length ? a.regions.join(', ') : 'no region tagged yet';
+    return `<div class="camp-alert-row ${cls}">
+      <div class="camp-alert-left">
+        <span class="camp-alert-label">${msg}</span>
+        <span class="camp-alert-name">${escHtml(info.label)} — ${escHtml(monthLabel)}</span>
+        <span class="camp-alert-sub">No checklist created yet · ${escHtml(regionsStr)}</span>
+      </div>
+      <button class="btn-primary" style="width:auto;padding:7px 16px;font-size:12px;white-space:nowrap;" onclick="_startCampaignFromAlert('${info.uiValue}',${a.year},${a.month})">+ Create Checklist</button>
+    </div>`;
+  }).join('');
+}
+
+// Jump straight into New Campaign with the phase/month/year pre-picked, so
+// the admin lands on the same Per-Region Deadlines preview this alert was
+// computed from and can just confirm + assign members.
+function _startCampaignFromAlert(phaseValue, year, month) {
+  openNewCampaignModal();
+  const nameEl = document.getElementById('new-campaign-name');
+  if (nameEl) nameEl.value = `${_phaseLabel(phaseValue)} — ${_MONTH_LABELS[month]} ${year}`;
+  const typeSel  = document.getElementById('new-campaign-cal-type');
+  const monthSel = document.getElementById('new-campaign-cal-month');
+  const yearSel  = document.getElementById('new-campaign-cal-year');
+  if (typeSel)  typeSel.value  = phaseValue;
+  if (monthSel) monthSel.value = String(month);
+  if (yearSel)  yearSel.value  = String(year);
+  refreshNewCampCalendarMap();
+}
+
 // ─────────────────────────────────────────────────────────────
 //  DASHBOARD WIDGETS
 // ─────────────────────────────────────────────────────────────
@@ -575,6 +626,7 @@ function renderDashboardWidgets(rows) {
   renderDeadlinePanel();
   renderAlertsBanner(rows);
   renderDdayBanner();
+  renderCampaignAlertBanner();
   renderTaskChecksInDashboard();
 }
 
@@ -1771,11 +1823,15 @@ function _regionsWithoutDeadline({ year, month, campaignType }, resolvedMap) {
       if (want && got && want !== got) return;
       if ((!want || !got) && _calCampaignType(e).id !== campaignType && e.type !== campaignType) return;
     }
-    // Only D-Day / Deadline events can supply a deadline; a region seen only
-    // via a teasing/meeting event isn't "missing a deadline" in a meaningful
-    // sense, so don't flag it. This keeps the flag list to genuinely
-    // actionable gaps (a D-Day with no time, or no Deadline event).
-    if (e.type !== 'dday' && e.type !== 'deadline') return;
+    // D-Day / Deadline events can supply a deadline directly; a phase-tagged
+    // "Other"-milestone event (e.g. Campaign=Mid-Month, Milestone left as
+    // default) is treated the same way buildRegionDeadlineMap treats it — as
+    // an implicit D-Day. A region seen only via a Teasing/Meeting event isn't
+    // "missing a deadline" in a meaningful sense, so those still aren't
+    // flagged. This keeps the flag list to genuinely actionable gaps (a D-Day
+    // /implicit D-Day with no time, or no Deadline event).
+    const isImplicitDday = (e.type === 'other' || !e.type) && _canonicalPhase(_calCampaignType(e).id);
+    if (e.type !== 'dday' && e.type !== 'deadline' && !isImplicitDday) return;
     const r = _calRegionOf(e);
     if (!r) return;
     seen.add(r.id);
@@ -2024,6 +2080,11 @@ async function createCampaign() {
       dday:       combineDatetime('new-campaign-dday', 'new-campaign-dday-time'),
       deadline:   combineDatetime('new-campaign-deadline', 'new-campaign-deadline-time'),
       regionDeadlines,
+      // Whatever phase was picked in "Per-Region Deadlines from Calendar" —
+      // saved on the campaign itself so future features (e.g. the upcoming-
+      // campaign alert) can match it precisely instead of guessing from the
+      // name. '' (Any phase) is normalised to null, same as an untouched picker.
+      campaignType: document.getElementById('new-campaign-cal-type')?.value || null,
       fromPollId: pollId,
       // Only shout about it when there's actually a pre-filled checklist waiting.
       broadcastMessage: hasEntries
@@ -3432,7 +3493,12 @@ function _deadlineFromDday(ddayStr) {
 // For one month + campaign type, return { REGION: deadlineISO } read straight
 // from the admin's calendar. Each region's deadline is:
 //   1. an explicit Deadline-type event for that region, if present; else
-//   2. that region's D-Day event time minus 4h (DEADLINE_OFFSET_HOURS).
+//   2. that region's D-Day event time minus 4h (DEADLINE_OFFSET_HOURS); else
+//   3. a phase-tagged event whose Milestone was left as the default "Other"
+//      (e.g. a "Mid-Month Sale" event that only has Campaign/Region/Platform
+//      set) — treated the same as #2, since in practice admins often tag
+//      region+platform on the sale event itself without switching Milestone
+//      to D-Day/Deadline.
 // This is the single source of truth reporting compares against, so the admin
 // only ever maintains the calendar. One generation covers every region; each
 // region is then judged against its own deadline (see renderAdminView).
@@ -3505,13 +3571,23 @@ function buildRegionDeadlineMap({ year, month, campaignType }) {
     const key = _deadlineKey(region, platformId);
 
     const bump = (k) => {
-      perKey[k] = perKey[k] || { dday: null, deadline: null };
+      perKey[k] = perKey[k] || { dday: null, deadline: null, fallback: null };
       if (e.type === 'deadline') {
         const iso = _dt(e);
         if (!perKey[k].deadline || iso < perKey[k].deadline) perKey[k].deadline = iso;
       } else if (e.type === 'dday') {
         const iso = _dt(e);
         if (!perKey[k].dday || iso < perKey[k].dday) perKey[k].dday = iso;
+      } else if ((e.type === 'other' || !e.type) && _canonicalPhase(_calCampaignType(e).id)) {
+        // The event's Milestone dropdown was left on its default ("Other")
+        // but its Campaign dropdown carries a real phase (Mid-Month/PayDay/
+        // Double Digit) — e.g. a "Mid-Month Sale" event the admin tagged with
+        // region + platform but never switched to D-Day/Deadline. Treat it as
+        // an implicit D-Day so the deadline map isn't blind to it just because
+        // a second dropdown wasn't touched. Explicit dday/deadline events
+        // above still take priority whenever they exist for the same key.
+        const iso = _dt(e);
+        if (!perKey[k].fallback || iso < perKey[k].fallback) perKey[k].fallback = iso;
       }
     };
     bump(key);
@@ -3524,12 +3600,94 @@ function buildRegionDeadlineMap({ year, month, campaignType }) {
 
   const out = {};
   Object.entries(perKey).forEach(([key, v]) => {
-    const deadline = v.deadline || _deadlineFromDday(v.dday);
+    const deadline = v.deadline || _deadlineFromDday(v.dday) || _deadlineFromDday(v.fallback);
     if (deadline) out[key] = deadline;
   });
   // Shape: { "MY|shopee": "2026-07-19T16:00", "MY|lazada": "2026-07-24T16:00",
   //          "MY": "2026-07-19T16:00" (region-wide fallback), ... }
   return out;
+}
+
+// ── Upcoming campaign alert ─────────────────────────────────────────────
+// Warns the admin when a campaign phase is coming up soon on the calendar
+// (any Teasing/D-Day/Deadline/Other event tagged with a Campaign phase) but
+// no campaign/checklist has been created for it yet. Reuses the same phase
+// vocabulary and calendar-reading helpers as the deadline map above, so a
+// phase+month is judged identically here and in the New Campaign preview.
+
+// How many days out to start warning about an approaching, checklist-less
+// campaign phase.
+const CAMPAIGN_ALERT_LOOKAHEAD_DAYS = 14;
+
+// Map a canonical phase token (mid/payday/dd, from _canonicalPhase) back to
+// the <select> value + display label used by the New Campaign calendar
+// controls and the entry-form Campaign dropdown.
+const _CANON_PHASE_INFO = {
+  mid:    { uiValue: 'mid_month',    label: 'Mid-Month'    },
+  payday: { uiValue: 'payday',       label: 'PayDay'       },
+  dd:     { uiValue: 'double_digit', label: 'Double Digit' },
+};
+
+// Best-effort: does an existing campaign already "cover" this phase+month?
+// Checked in order of confidence:
+//   1. an explicit campaignType on the campaign doc (set by New Campaign's
+//      Per-Region Deadlines from Calendar picker — see createCampaign());
+//   2. phase/month/year parsed out of the campaign name, the same best-effort
+//      parse the calendar-mapping preview already falls back to;
+//   3. if neither side can tell us a phase at all, a loose month-only match
+//      on the campaign's own dates, so a completely untagged/untitled
+//      campaign still isn't re-flagged.
+// This deliberately leans toward NOT alerting when unsure — a missed
+// reminder is noticed a day later on the calendar; a false alarm on every
+// dashboard load just trains admins to ignore the banner.
+function _campaignCoversPhaseMonth(camp, phase, year, month) {
+  if (!camp) return false;
+  const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+  const inferred  = inferGenScopeFromName(camp.name);
+  const campPhase = _canonicalPhase(camp.campaignType) || _canonicalPhase(inferred.campaignType);
+
+  const dates = [camp.dday, camp.deadline, ...Object.values(camp.regionDeadlines || {})]
+    .filter(Boolean)
+    .map(d => String(d).slice(0, 7));
+  const nameMonthStr = (inferred.year != null && inferred.month != null)
+    ? `${inferred.year}-${String(inferred.month + 1).padStart(2, '0')}`
+    : null;
+  const monthMatches = dates.includes(monthStr) || nameMonthStr === monthStr;
+
+  if (campPhase) return campPhase === phase && monthMatches;
+  return monthMatches;
+}
+
+// Scan the calendar for phase-tagged events within the lookahead window,
+// bucket them into one alert per phase+month (so 5 "MY/PH/VN Mid-Month"
+// events collapse into a single "Mid-Month — August" alert), and drop any
+// bucket an existing campaign already covers.
+function getUpcomingCampaignAlerts(lookaheadDays = CAMPAIGN_ALERT_LOOKAHEAD_DAYS) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const horizon = new Date(today); horizon.setDate(horizon.getDate() + lookaheadDays);
+
+  const groups = {}; // "phase|year|month" -> { phase, year, month, earliest, regions:Set }
+  calendarEntries.forEach(e => {
+    if (!e.date) return;
+    const phase = _canonicalPhase(_calCampaignType(e).id);
+    if (!phase) return; // no Campaign phase tagged on this event at all
+    const d = new Date(String(e.date).slice(0, 10));
+    if (isNaN(d) || d < today || d > horizon) return;
+
+    const year = d.getFullYear(), month = d.getMonth();
+    const key = `${phase}|${year}|${month}`;
+    const r = _calRegionOf(e);
+    groups[key] = groups[key] || { phase, year, month, earliest: d, regions: new Set() };
+    if (d < groups[key].earliest) groups[key].earliest = d;
+    if (r) groups[key].regions.add(r.label || r.id);
+  });
+
+  const campList = Object.values(campaigns);
+  return Object.values(groups)
+    .filter(g => !campList.some(c => _campaignCoversPhaseMonth(c, g.phase, g.year, g.month)))
+    .map(g => ({ ...g, regions: [...g.regions].sort(), daysUntil: Math.round((g.earliest - today) / 86400000) }))
+    .sort((a, b) => a.earliest - b.earliest);
 }
 
 // ── Missing-deadline resolution modal ───────────────────────────────────

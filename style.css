@@ -1531,6 +1531,33 @@ thead tr.sub-head th.col-freeze-item2 { background: var(--navy); }
 .dday-banner-date { font-size: 12px; opacity: 0.75; }
 
 /* ═══════════════════════════════════════════
+   UPCOMING CAMPAIGN ALERT BANNER
+   "A campaign phase is coming up with no checklist yet"
+═══════════════════════════════════════════ */
+
+.camp-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  border-left: 4px solid;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.camp-alert-row:last-child { margin-bottom: 0; }
+
+.camp-alert-row.camp-alert-green { background: #EFF6FF; border-color: #2563EB; color: #1E3A8A; }
+.camp-alert-row.camp-alert-amber { background: #FEF3C7; border-color: #D97706; color: #92400E; }
+.camp-alert-row.camp-alert-red   { background: #FEE2E2; border-color: #DC2626; color: #991B1B; }
+
+.camp-alert-left { display: flex; flex-direction: column; gap: 2px; }
+.camp-alert-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.camp-alert-name { font-size: 14px; font-weight: 600; }
+.camp-alert-sub { font-size: 12px; opacity: 0.8; }
+
+/* ═══════════════════════════════════════════
    MEMBER PROGRESS BANNER
 ═══════════════════════════════════════════ */
 
