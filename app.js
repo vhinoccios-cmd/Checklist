@@ -4445,16 +4445,27 @@ function _calValidateEntry() {
     return [];
   }
 
-  const region   = document.getElementById('cal-entry-region')?.value || '';
-  const platform = document.getElementById('cal-entry-platform')?.value || '';
-  const date     = document.getElementById('cal-entry-date')?.value || '';
-  const startTime = _getCalTimeField('start'); // '' unless HH+MM+AM/PM all set
+  const region       = document.getElementById('cal-entry-region')?.value || '';
+  const platform     = document.getElementById('cal-entry-platform')?.value || '';
+  const date         = document.getElementById('cal-entry-date')?.value || '';
+  const startTime    = _getCalTimeField('start'); // '' unless HH+MM+AM/PM all set
+  const milestone    = document.getElementById('cal-entry-type')?.value || 'other';
+  const campaignType = document.getElementById('cal-entry-campaign-type')?.value || 'other';
 
   const missing = [];
   if (!region)    missing.push('Region');
   if (!platform)  missing.push('Platform');
   if (!date)      missing.push('Start Date');
   if (!startTime) missing.push('Start Time');
+  // D-Day/Deadline events are what buildRegionDeadlineMap() reads to generate
+  // per-region checklist deadlines, and it filters them by Campaign phase
+  // (Mid-Month/PayDay/Double Digit). The Campaign select defaults to "Other",
+  // so without this check a D-Day/Deadline event can be saved fully "complete"
+  // (region+platform+date+time) yet still be invisible to every phase-filtered
+  // New Campaign preview — the exact "no region-tagged events found" trap.
+  if ((milestone === 'dday' || milestone === 'deadline') && campaignType === 'other') {
+    missing.push('Campaign phase');
+  }
 
   if (saveBtn) {
     const ok = missing.length === 0;
@@ -4468,7 +4479,8 @@ function _calValidateEntry() {
     } else {
       hint.style.display = 'block';
       hint.innerHTML = `Complete these before saving: <strong>${missing.map(escHtml).join(', ')}</strong>. `
-        + `Shared events need a region, platform, date and start time so the checklist has a complete deadline reference.`;
+        + `Shared events need a region, platform, date and start time so the checklist has a complete deadline reference`
+        + `${missing.includes('Campaign phase') ? ' — and D-Day/Deadline events need a real Campaign phase (not "Other") or they won\'t show up in phase-filtered checklist generation.' : '.'}`;
     }
   }
   return missing;
@@ -4514,10 +4526,11 @@ async function saveCalEntry() {
     showError(errEl, '"Repeat Until" must be on or after the start date.'); return;
   }
 
-  // Completeness backstop for SHARED events: region, platform, date and start
-  // time are all required so the checklist always has a full deadline reference.
-  // The Save button is disabled live while anything's missing (see
-  // _calValidateEntry); this guards the programmatic path / any stale state.
+  // Completeness backstop for SHARED events: region, platform, date, start
+  // time (and, for D-Day/Deadline milestones, a real Campaign phase) are all
+  // required so the checklist always has a full deadline reference. The Save
+  // button is disabled live while anything's missing (see _calValidateEntry);
+  // this guards the programmatic path / any stale state.
   if (!personalMode) {
     const missing = _calValidateEntry();
     if (missing.length > 0) {
