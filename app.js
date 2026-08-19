@@ -6665,6 +6665,162 @@ async function saveTemplate() {
   } catch(e) { showError(errEl, 'Failed to save template. Please try again.'); console.error(e); }
 }
 
+// ═════════════════════════════════════════════════════════════
+//  IMPORT TEMPLATE FROM FILE
+//  Any Excel/CSV with a header row → each column becomes a
+//  checklist item. Admin picks which columns count as items, then
+//  we hand off to the existing (manual) Template Editor pre-seeded
+//  with those items — reusing its drag/reorder/rename/add/remove
+//  UI rather than duplicating it here.
+// ═════════════════════════════════════════════════════════════
+
+// Column headers that are almost never checklist items themselves —
+// they identify the entry (who/what) or hold status/meta info, not a
+// task. Pre-unchecked in the preview; admin can still re-check any of
+// them if their sheet really does want it as an item.
+const TMPL_IMPORT_META_HEADERS = [
+  'cdm', 'username', 'name', 'brand', 'platform', 'region',
+  'date completed', 'date', 'completed', 'remarks', 'notes', 'status',
+  'pic', 'owner', 'assignee', 'campaign', 'deadline'
+];
+
+let _tmplImportHeaders  = []; // [{ label, checked }] in file order
+let _tmplImportFileName = '';
+
+function openImportTemplateModal() {
+  _tmplImportHeaders  = [];
+  _tmplImportFileName = '';
+  document.getElementById('tmpl-import-file').value = '';
+  document.getElementById('tmpl-import-cols-field').style.display = 'none';
+  document.getElementById('tmpl-import-name-field').style.display = 'none';
+  document.getElementById('tmpl-import-section-name').value = '';
+  document.getElementById('tmpl-import-cols-list').innerHTML = '';
+  document.getElementById('tmpl-import-error').style.display = 'none';
+  document.getElementById('tmpl-import-continue-btn').disabled = true;
+  document.getElementById('tmpl-import-overlay').style.display = 'flex';
+}
+
+function closeImportTemplateModal(e) {
+  if (e && e.target !== document.getElementById('tmpl-import-overlay')) return;
+  document.getElementById('tmpl-import-overlay').style.display = 'none';
+}
+
+function handleImportTemplateFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const errEl = document.getElementById('tmpl-import-error');
+  errEl.style.display = 'none';
+  _tmplImportFileName = file.name.replace(/\.[^.]+$/, '');
+
+  const isXlsx = /\.(xlsx|xls|xlsm)$/i.test(file.name);
+  if (isXlsx) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        _parseImportTemplateRows(rows, errEl);
+      } catch (err) {
+        showError(errEl, 'Failed to read the file. Make sure it is a valid .xlsx or .xls file.');
+        console.error(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result.replace(/^\uFEFF/, '');
+      const rows = text.split(/\r?\n/).filter(r => r.trim() !== '').map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+      _parseImportTemplateRows(rows, errEl);
+    };
+    reader.readAsText(file);
+  }
+}
+
+// Finds the first row that looks like a header row: at least 2 non-empty
+// cells and no purely-numeric cells (which would suggest a data row).
+function _findGenericHeaderRowIndex(rows) {
+  const limit = Math.min(rows.length, 10);
+  for (let i = 0; i < limit; i++) {
+    const cells = (rows[i] || []).map(c => String(c || '').trim());
+    const nonEmpty = cells.filter(c => c !== '');
+    if (nonEmpty.length < 2) continue;
+    const looksNumeric = nonEmpty.every(c => !isNaN(c));
+    if (!looksNumeric) return i;
+  }
+  return rows.length ? 0 : -1;
+}
+
+function _parseImportTemplateRows(rows, errEl) {
+  if (!rows.length) { showError(errEl, 'File appears empty.'); return; }
+
+  const headerRowIdx = _findGenericHeaderRowIndex(rows);
+  if (headerRowIdx < 0) { showError(errEl, 'Could not find a header row in this file.'); return; }
+
+  const rawHeaders = (rows[headerRowIdx] || []).map(h => String(h || '').trim()).filter(h => h !== '');
+  if (rawHeaders.length === 0) { showError(errEl, 'No column headers found in this file.'); return; }
+
+  _tmplImportHeaders = rawHeaders.map(label => ({
+    label,
+    checked: !TMPL_IMPORT_META_HEADERS.includes(label.toLowerCase().trim())
+  }));
+
+  document.getElementById('tmpl-import-section-name').value = _tmplImportFileName || 'Imported Checklist';
+  _renderImportTemplatePreview();
+}
+
+function _renderImportTemplatePreview() {
+  const list = document.getElementById('tmpl-import-cols-list');
+  list.innerHTML = _tmplImportHeaders.map((h, i) => `
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer;">
+      <input type="checkbox" ${h.checked ? 'checked' : ''} onchange="_tmplImportHeaders[${i}].checked=this.checked;_updateImportContinueState()" />
+      <span>${escHtml(h.label)}</span>
+    </label>
+  `).join('');
+  document.getElementById('tmpl-import-cols-field').style.display = '';
+  document.getElementById('tmpl-import-name-field').style.display = '';
+  _updateImportContinueState();
+}
+
+function _updateImportContinueState() {
+  const anyChecked = _tmplImportHeaders.some(h => h.checked);
+  document.getElementById('tmpl-import-continue-btn').disabled = !anyChecked;
+}
+
+// Hands off to the existing manual Template Editor, pre-seeded with the
+// checked columns as items in a single section. Admin can still rename,
+// reorder, add, or remove items there using its existing drag-and-drop UI
+// before saving — this import step only builds the starting point.
+function confirmImportTemplate() {
+  const errEl = document.getElementById('tmpl-import-error');
+  const checkedHeaders = _tmplImportHeaders.filter(h => h.checked);
+  if (checkedHeaders.length === 0) { showError(errEl, 'Select at least one column to use as a checklist item.'); return; }
+
+  const sectionName = document.getElementById('tmpl-import-section-name').value.trim() || 'Imported Checklist';
+  const secId = `sec_${Date.now()}`;
+  const section = {
+    id: secId,
+    title: sectionName,
+    items: checkedHeaders.map((h, i) => ({ id: `${secId}_${Date.now()}_${i}`, name: h.label, guide: '' }))
+  };
+
+  // Seed the editor exactly like openNewTemplateModal does, but with our
+  // imported section instead of the default sections, and default to
+  // "No D-5" since imported/flat checklists typically have a single stage.
+  editingTemplateId = null;
+  templateEditorSections = [section];
+  document.getElementById('tmpl-name-input').value = sectionName;
+  document.getElementById('tmpl-d5-select').value = 'no';
+  document.getElementById('tmpl-editor-modal-title').textContent = '✏️ New Template (from file)';
+  document.getElementById('tmpl-editor-error').style.display = 'none';
+  renderTmplEditor();
+
+  closeImportTemplateModal();
+  document.getElementById('tmpl-editor-overlay').style.display = 'flex';
+}
+
 // ── Populate the template selector in the New Campaign modal ─
 async function populateCampaignTemplateSel() {
   await populateTemplateSel('campaign-template-sel');

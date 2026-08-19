@@ -397,6 +397,7 @@
             <p class="page-sub">Create and manage named checklist templates for campaigns</p>
           </div>
           <div class="page-header-actions">
+            <button class="btn-outline" style="width:auto;padding:8px 18px;" onclick="openImportTemplateModal()">📤 Import from File</button>
             <button class="btn-primary" style="width:auto;padding:8px 18px;" onclick="openNewTemplateModal()">+ New Template</button>
           </div>
         </div>
@@ -897,6 +898,40 @@
       <div class="modal-actions" style="flex-shrink:0;margin-top:14px;">
         <button class="btn-ghost-light" onclick="closeTmplEditorModal()">Cancel</button>
         <button class="btn-primary" style="width:auto;" onclick="saveTemplate()">💾 Save Template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Template From File Modal -->
+  <div id="tmpl-import-overlay" style="display:none;" onclick="closeImportTemplateModal(event)">
+    <div class="modal" style="max-width:620px;">
+      <div class="modal-header">
+        <h3>📤 Build Template from File</h3>
+        <button class="btn-ghost-light" onclick="closeImportTemplateModal()">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;line-height:1.6;">
+        Upload any Excel/CSV with a header row. Each column becomes a checklist item — pick which columns to include below, then continue to the editor to rename, reorder, add, or remove items before saving.
+      </p>
+
+      <div class="field">
+        <label>Select Excel (.xlsx) or CSV file</label>
+        <input type="file" id="tmpl-import-file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="font-size:13px;padding:6px;" onchange="handleImportTemplateFile(event)" />
+      </div>
+
+      <div class="field" id="tmpl-import-cols-field" style="display:none;">
+        <label>Columns detected — uncheck any that aren't checklist items (e.g. ID/status columns are pre-unchecked)</label>
+        <div id="tmpl-import-cols-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+      </div>
+
+      <div class="field" id="tmpl-import-name-field" style="display:none;">
+        <label>Section name for these items</label>
+        <input type="text" id="tmpl-import-section-name" placeholder="e.g. Post-Campaign Checklist" />
+      </div>
+
+      <div id="tmpl-import-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeImportTemplateModal()">Cancel</button>
+        <button id="tmpl-import-continue-btn" class="btn-primary" style="width:auto;" onclick="confirmImportTemplate()" disabled>Continue to Editor →</button>
       </div>
     </div>
   </div>
