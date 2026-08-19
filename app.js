@@ -6682,6 +6682,9 @@ const TMPL_IMPORT_IDENTIFIER_HEADERS = [
   'pic', 'username', 'name'
 ];
 
+// Free-text/meta columns that aren't a checklist task either — pre-unchecked.
+const TMPL_IMPORT_META_HEADERS = ['remarks', 'notes', 'comments'];
+
 // Columns that are computed/derived by the tool itself rather than filled
 // in by a member — also pre-unchecked by default.
 const TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS = [
@@ -6769,8 +6772,9 @@ function _parseImportTemplateRows(rows, errEl) {
   _tmplImportHeaders = rawHeaders.map(label => {
     const norm = label.toLowerCase().trim();
     const isIdentifier = TMPL_IMPORT_IDENTIFIER_HEADERS.includes(norm);
+    const isMeta = TMPL_IMPORT_META_HEADERS.includes(norm);
     const isAutoComputed = TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(label));
-    return { label, checked: !isIdentifier && !isAutoComputed };
+    return { label, checked: !isIdentifier && !isMeta && !isAutoComputed };
   });
 
   document.getElementById('tmpl-import-section-name').value = _tmplImportFileName || 'Imported Checklist';
@@ -6783,6 +6787,7 @@ function _renderImportTemplatePreview() {
     const norm = h.label.toLowerCase().trim();
     let tag = '';
     if (TMPL_IMPORT_IDENTIFIER_HEADERS.includes(norm)) tag = '<span style="font-size:10px;color:var(--text-faint);margin-left:6px;">allocation field</span>';
+    else if (TMPL_IMPORT_META_HEADERS.includes(norm)) tag = '<span style="font-size:10px;color:var(--text-faint);margin-left:6px;">not a task</span>';
     else if (TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(h.label))) tag = '<span style="font-size:10px;color:var(--text-faint);margin-left:6px;">auto-computed</span>';
     return `
     <label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer;">
