@@ -1977,6 +1977,18 @@ thead tr.sub-head th.col-freeze-item2 { background: var(--navy); }
 
 .tmpl-item-del-btn:hover { color: var(--danger); }
 
+.tmpl-item-type-sel {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.tmpl-item-type-sel:focus { border-color: var(--blue); outline: none; }
+
 .tmpl-add-item-btn {
   display: flex;
   align-items: center;

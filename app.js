@@ -6883,6 +6883,11 @@ function renderTmplEditor() {
                   placeholder="Guide / description (optional)"
                   onchange="templateEditorSections[${si}].items[${ii}].guide=this.value" />
               </div>
+              <select class="tmpl-item-type-sel" title="Answer type for this item"
+                onchange="templateEditorSections[${si}].items[${ii}].type=this.value||undefined">
+                <option value="" ${!item.type ? 'selected' : ''}>Status</option>
+                <option value="yesno" ${item.type === 'yesno' ? 'selected' : ''}>Yes / No</option>
+              </select>
               <button class="tmpl-item-del-btn" onclick="tmplDeleteItem(${si},${ii})" title="Remove item">✕</button>
             </div>`).join('')
         }
