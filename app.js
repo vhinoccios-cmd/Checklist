@@ -6674,14 +6674,18 @@ async function saveTemplate() {
 //  UI rather than duplicating it here.
 // ═════════════════════════════════════════════════════════════
 
-// Only auto-computed/summary columns get pre-unchecked (e.g. a formula
-// column like "Post 6.6 Checklist Status (AUTO UPDATE)") — everything
-// else, including identifier columns like CDM/Brand/Platform/Region,
-// defaults to CHECKED, since those are meant to appear as item rows
-// (see the "Sample Post Campaign Checklist" template). Admin can still
-// uncheck/re-check anything in the preview before continuing.
+// Identifier/allocation columns — these define WHO the entry belongs to
+// and WHAT brand/platform/region it covers (the same role they play in
+// Bulk Assign), not a task someone completes. Pre-unchecked by default.
+const TMPL_IMPORT_IDENTIFIER_HEADERS = [
+  'region', 'brand', 'brand name', 'platform', 'cdm', 'team lead', 'lead',
+  'pic', 'username', 'name'
+];
+
+// Columns that are computed/derived by the tool itself rather than filled
+// in by a member — also pre-unchecked by default.
 const TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS = [
-  /auto[\s-]?update/i, /^status$/i
+  /auto[\s-]?update/i, /^status$/i, /date completed/i
 ];
 
 let _tmplImportHeaders  = []; // [{ label, checked }] in file order
@@ -6762,10 +6766,12 @@ function _parseImportTemplateRows(rows, errEl) {
   const rawHeaders = (rows[headerRowIdx] || []).map(h => String(h || '').trim()).filter(h => h !== '');
   if (rawHeaders.length === 0) { showError(errEl, 'No column headers found in this file.'); return; }
 
-  _tmplImportHeaders = rawHeaders.map(label => ({
-    label,
-    checked: !TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(label))
-  }));
+  _tmplImportHeaders = rawHeaders.map(label => {
+    const norm = label.toLowerCase().trim();
+    const isIdentifier = TMPL_IMPORT_IDENTIFIER_HEADERS.includes(norm);
+    const isAutoComputed = TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(label));
+    return { label, checked: !isIdentifier && !isAutoComputed };
+  });
 
   document.getElementById('tmpl-import-section-name').value = _tmplImportFileName || 'Imported Checklist';
   _renderImportTemplatePreview();
@@ -6773,12 +6779,17 @@ function _parseImportTemplateRows(rows, errEl) {
 
 function _renderImportTemplatePreview() {
   const list = document.getElementById('tmpl-import-cols-list');
-  list.innerHTML = _tmplImportHeaders.map((h, i) => `
+  list.innerHTML = _tmplImportHeaders.map((h, i) => {
+    const norm = h.label.toLowerCase().trim();
+    let tag = '';
+    if (TMPL_IMPORT_IDENTIFIER_HEADERS.includes(norm)) tag = '<span style="font-size:10px;color:var(--text-faint);margin-left:6px;">allocation field</span>';
+    else if (TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(h.label))) tag = '<span style="font-size:10px;color:var(--text-faint);margin-left:6px;">auto-computed</span>';
+    return `
     <label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer;">
       <input type="checkbox" ${h.checked ? 'checked' : ''} onchange="_tmplImportHeaders[${i}].checked=this.checked;_updateImportContinueState()" />
-      <span>${escHtml(h.label)}</span>
-    </label>
-  `).join('');
+      <span>${escHtml(h.label)}</span>${tag}
+    </label>`;
+  }).join('');
   document.getElementById('tmpl-import-cols-field').style.display = '';
   document.getElementById('tmpl-import-name-field').style.display = '';
   _updateImportContinueState();
