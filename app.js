@@ -6674,14 +6674,14 @@ async function saveTemplate() {
 //  UI rather than duplicating it here.
 // ═════════════════════════════════════════════════════════════
 
-// Column headers that are almost never checklist items themselves —
-// they identify the entry (who/what) or hold status/meta info, not a
-// task. Pre-unchecked in the preview; admin can still re-check any of
-// them if their sheet really does want it as an item.
-const TMPL_IMPORT_META_HEADERS = [
-  'cdm', 'username', 'name', 'brand', 'platform', 'region',
-  'date completed', 'date', 'completed', 'remarks', 'notes', 'status',
-  'pic', 'owner', 'assignee', 'campaign', 'deadline'
+// Only auto-computed/summary columns get pre-unchecked (e.g. a formula
+// column like "Post 6.6 Checklist Status (AUTO UPDATE)") — everything
+// else, including identifier columns like CDM/Brand/Platform/Region,
+// defaults to CHECKED, since those are meant to appear as item rows
+// (see the "Sample Post Campaign Checklist" template). Admin can still
+// uncheck/re-check anything in the preview before continuing.
+const TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS = [
+  /auto[\s-]?update/i, /^status$/i
 ];
 
 let _tmplImportHeaders  = []; // [{ label, checked }] in file order
@@ -6764,7 +6764,7 @@ function _parseImportTemplateRows(rows, errEl) {
 
   _tmplImportHeaders = rawHeaders.map(label => ({
     label,
-    checked: !TMPL_IMPORT_META_HEADERS.includes(label.toLowerCase().trim())
+    checked: !TMPL_IMPORT_AUTO_EXCLUDE_PATTERNS.some(re => re.test(label))
   }));
 
   document.getElementById('tmpl-import-section-name').value = _tmplImportFileName || 'Imported Checklist';
