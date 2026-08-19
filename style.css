@@ -1000,7 +1000,8 @@ thead tr.sub-head th.col-freeze-item2 { background: var(--navy); }
 #gen-checklist-overlay,
 #campaign-chooser-overlay,
 #resolve-deadlines-overlay,
-#map-masterlist-overlay {
+#map-masterlist-overlay,
+#after-party-overlay {
   position: fixed; inset: 0;
   background: rgba(17,40,80,0.55);
   display: flex; align-items: center; justify-content: center;

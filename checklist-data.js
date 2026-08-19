@@ -103,6 +103,20 @@ const CHECKLIST_SECTIONS = [
       { id: 'tr_01', name: 'Pre-Campaign Tracker', guide: 'Do we have the pre-campaign tracker template ready? (to monitor brand performance)' },
       { id: 'tr_02', name: 'Campaign D-Day Tracker', guide: 'Do we have the campaign D-Day tracker template ready? (to monitor brand performance)' },
     ]
+  },
+  {
+    id: 'after_party',
+    title: 'After Party',
+    items: [
+      // type: 'yesno' — this item renders a Yes/No selector instead of the
+      // usual Pending/Done/In Progress/N/A status dropdown (see
+      // yesNoOptions() / handleStatusChange() in app.js). Selecting "Yes"
+      // prompts for the after-party start/end dates, which then become
+      // this entry's checklist deadline for compliance purposes and are
+      // written into the row's Notes column. Selecting "No" is treated as
+      // a completion sign — nothing further to do.
+      { id: 'ap_01', name: 'Joining the After Party?', guide: 'Is this entry (brand/platform/region) joining the After Party extension?', type: 'yesno' },
+    ]
   }
 ];
 

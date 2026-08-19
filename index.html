@@ -1642,6 +1642,32 @@
     </div>
   </div>
 
+  <!-- ═══════════ AFTER PARTY DATES MODAL ═══════════ -->
+  <div id="after-party-overlay" style="display:none;" onclick="closeAfterPartyModal(event)">
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <h3>🎉 Joining the After Party?</h3>
+        <button class="btn-ghost-light" onclick="closeAfterPartyModal(true)">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin:-8px 0 16px;">
+        Enter the after-party start and end dates for this entry. The end date becomes this entry's new checklist deadline.
+      </p>
+      <div class="field">
+        <label>Start Date</label>
+        <input type="date" id="ap-start" />
+      </div>
+      <div class="field">
+        <label>End Date</label>
+        <input type="date" id="ap-end" />
+      </div>
+      <div id="ap-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeAfterPartyModal(true)">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="confirmAfterPartyDates()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>

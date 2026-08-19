@@ -344,8 +344,14 @@ async function renderAdminView(force) {
         const rd = camp.regionDeadlines || {};
         const _ov = camp.deadlineOverrides || {};
         const comboKey = _deadlineKey(entryRegion, entryPlatform);
+        // If this entry answered "Yes" to "Joining the After Party?", the
+        // after-party END date the member entered supersedes every other
+        // deadline source — it's the newest, most specific commitment for
+        // this exact entry (see openAfterPartyModal / confirmAfterPartyDates).
+        const afterPartyDeadline = (eb.entry && eb.entry.afterPartyEnd) || null;
         const rowDeadline =
-          (entryRegion && entryPlatform && rd[comboKey])   // exact region+platform
+          afterPartyDeadline                                // after-party override (highest priority)
+          || (entryRegion && entryPlatform && rd[comboKey])   // exact region+platform
           || (entryRegion && rd[entryRegion])               // region-wide fallback
           || _ov[comboKey] || (entryRegion && _ov[entryRegion]) // admin override
           || camp.deadline                                  // campaign-wide
@@ -372,6 +378,7 @@ async function renderAdminView(force) {
           comboKey,
           needsDeadline,
           rowDeadline,
+          isAfterPartyDeadline: !!afterPartyDeadline,
           dueState,
           isIssue: dueState === 'overdue',
           d5Done: eb.d5Done, d1Done: eb.d1Done, overallDone: eb.overallPct,
@@ -1183,7 +1190,10 @@ function countDone(obj, validIds) {
       if (!validIds.has(baseId)) return false;
     }
     const v = obj[key];
-    return v && (v.status === 'done' || v.status === 'na');
+    // 'yes'/'no' are the answered states of a "yesno"-type item (e.g.
+    // "Joining the After Party?") — either answer counts as complete,
+    // same as Done/N/A for a normal item.
+    return v && (v.status === 'done' || v.status === 'na' || v.status === 'yes' || v.status === 'no');
   }).length;
 }
 
@@ -1229,7 +1239,7 @@ function countDoneForEntryIdx(dataObj, entryIdx, validIds) {
       if (!validIds.has(baseId)) return;
     }
     const v = dataObj[key];
-    if (v && (v.status === 'done' || v.status === 'na')) n++;
+    if (v && (v.status === 'done' || v.status === 'na' || v.status === 'yes' || v.status === 'no')) n++;
   });
   return n;
 }
@@ -1266,6 +1276,10 @@ function getEntryBreakdown(cl, totalItems, validIds, hasD5) {
       label: entries.length > 1 ? buildEntryLabel(entry, idx) : null,
       region: entry.region || '',
       platform: entry.platform || '',
+      // Raw entry object — carries afterPartyStart/afterPartyEnd when the
+      // member answered "Yes" to "Joining the After Party?" for this entry,
+      // so callers computing this entry's compliance deadline can honor it.
+      entry,
       d5Done, d1Done, d5Pct, d1Pct, overallPct, totalItems: ti, hasD5: d5Enabled,
     };
   });
@@ -2953,9 +2967,9 @@ function renderUserChecklist() {
             onchange="onRowCbChange()" />
         </td>
         <td style="background:rgba(37,99,235,0.04);padding:4px 6px;">
-          <select class="status-sel ${statusClass(d5val)}" id="sel-d5-${item.id}-${ei}"
+          <select class="status-sel ${statusClass(d5val)}" id="sel-d5-${item.id}-${ei}" data-prev="${d5val}"
             onchange="handleStatusChange('${item.id}','d5',${ei},this)">
-            ${statusOptions(d5val)}
+            ${item.type === 'yesno' ? yesNoOptions(d5val) : statusOptions(d5val)}
           </select>
         </td>` : ''}
         <td class="d1-cb-col" ${!hasD5 ? `style="${borderL};"` : ''}>
@@ -2963,13 +2977,13 @@ function renderUserChecklist() {
             onchange="onRowCbChange()" />
         </td>
         <td style="background:rgba(124,58,237,0.04);padding:4px 6px;">
-          <select class="status-sel ${statusClass(d1val)}" id="sel-d1-${item.id}-${ei}"
+          <select class="status-sel ${statusClass(d1val)}" id="sel-d1-${item.id}-${ei}" data-prev="${d1val}"
             onchange="handleStatusChange('${item.id}','d1',${ei},this)">
-            ${statusOptions(d1val)}
+            ${item.type === 'yesno' ? yesNoOptions(d1val) : statusOptions(d1val)}
           </select>
         </td>
         <td style="padding:4px 6px;">
-          <input class="note-input" type="text" placeholder="Notes…" value="${sharedNote}"
+          <input class="note-input" type="text" placeholder="Notes…" value="${sharedNote}" id="note-${item.id}-${ei}"
             oninput="handleNoteChange('${item.id}','d1',${ei},this.value)"
             onblur="saveChecklist()" />
         </td>`;
@@ -3011,20 +3025,161 @@ function statusOptions(current) {
   return opts.map(o => `<option value="${o.v}" ${current === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
 }
 
+// Options for a "yesno"-type item (e.g. "Joining the After Party?") — a
+// plain Yes/No question rather than a task status.
+function yesNoOptions(current) {
+  const opts = [
+    { v: '',    l: 'Select…' },
+    { v: 'yes', l: 'Yes' },
+    { v: 'no',  l: 'No' },
+  ];
+  return opts.map(o => `<option value="${o.v}" ${current === o.v ? 'selected' : ''}>${o.l}</option>`).join('');
+}
+
 function statusClass(status) {
-  return { done: 's-done', 'in-progress': 's-progress', na: 's-na', '': 's-pending' }[status] || 's-pending';
+  return {
+    done: 's-done', 'in-progress': 's-progress', na: 's-na', '': 's-pending',
+    yes: 's-done', no: 's-na', // "yesno" item answers reuse the done/na color treatment
+  }[status] || 's-pending';
+}
+
+// Looks up a checklist item's definition by id across CHECKLIST_SECTIONS,
+// so rendering/handler code can tell a normal item apart from a "yesno"
+// item (e.g. "Joining the After Party?") without threading extra params
+// through every call site.
+function findChecklistItem(itemId) {
+  for (const sec of CHECKLIST_SECTIONS) {
+    const found = (sec.items || []).find(it => it.id === itemId);
+    if (found) return found;
+  }
+  return null;
 }
 
 function handleStatusChange(itemId, tab, entryIndex, selectEl) {
   const status = selectEl.value;
+  const item   = findChecklistItem(itemId);
+
+  // "yesno"-type items (e.g. "Joining the After Party?") don't behave like
+  // a normal task status: selecting "Yes" must first collect the after-party
+  // start/end dates via a popup before anything is committed — those dates
+  // become this entry's new checklist deadline and get written to Notes.
+  // Selecting "No" is a plain completion sign, same as any other status.
+  if (item && item.type === 'yesno' && status === 'yes') {
+    openAfterPartyModal(itemId, tab, entryIndex, selectEl);
+    return; // commit happens in confirmAfterPartyDates() if the user saves
+  }
+
   selectEl.className = `status-sel ${statusClass(status)}`;
+  selectEl.dataset.prev = status;
   ensurePath(tab);
   const key = entryIndex === 0 ? itemId : `${itemId}_e${entryIndex}`;
   userChecklist[selectedCampaignId][tab][key] = {
     ...(userChecklist[selectedCampaignId][tab][key] || {}), status
   };
+
+  // Reverting a "yesno" item away from "Yes" (back to blank or "No") clears
+  // any previously-set after-party override on this entry, so a stale date
+  // range doesn't keep overriding the compliance deadline.
+  if (item && item.type === 'yesno') {
+    clearAfterPartyOverride(entryIndex);
+  }
+
   updateUserProgress();
   saveChecklist();
+}
+
+// ─────────────────────────────────────────────────────────────
+//  "JOINING THE AFTER PARTY?" — Yes/No popup for start/end dates
+// ─────────────────────────────────────────────────────────────
+// When a member answers "Yes", we need the after-party start/end dates
+// before committing anything: those dates (a) become this entry's new
+// checklist deadline for compliance purposes, and (b) get written into
+// the Notes column right next to the Yes/No answer, on the same row.
+let _apCtx = null; // { itemId, tab, entryIndex, selectEl, prevValue }
+
+function openAfterPartyModal(itemId, tab, entryIndex, selectEl) {
+  _apCtx = { itemId, tab, entryIndex, selectEl, prevValue: selectEl.dataset.prev || '' };
+
+  const entries = getEntries();
+  const entry   = entries[entryIndex] || {};
+  document.getElementById('ap-start').value = entry.afterPartyStart || '';
+  document.getElementById('ap-end').value   = entry.afterPartyEnd   || '';
+  const errEl = document.getElementById('ap-modal-error');
+  if (errEl) errEl.style.display = 'none';
+
+  document.getElementById('after-party-overlay').style.display = 'flex';
+}
+
+// `arg` is either a bare boolean (true = revert the select, called from the
+// Cancel button) or a click event (backdrop click — only closes/reverts if
+// the click was directly on the overlay, not inside the modal card).
+function closeAfterPartyModal(arg) {
+  if (arg && arg.target) {
+    if (arg.target !== document.getElementById('after-party-overlay')) return;
+  }
+  document.getElementById('after-party-overlay').style.display = 'none';
+  const shouldRevert = arg === true || (arg && arg.target);
+  if (shouldRevert && _apCtx && _apCtx.selectEl) {
+    _apCtx.selectEl.value = _apCtx.prevValue;
+    _apCtx.selectEl.className = `status-sel ${statusClass(_apCtx.prevValue)}`;
+  }
+  _apCtx = null;
+}
+
+function confirmAfterPartyDates() {
+  if (!_apCtx) return;
+  const startVal = document.getElementById('ap-start').value;
+  const endVal   = document.getElementById('ap-end').value;
+  const errEl    = document.getElementById('ap-modal-error');
+
+  if (!startVal || !endVal) {
+    if (errEl) { errEl.textContent = 'Please enter both a start and end date.'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (new Date(endVal) < new Date(startVal)) {
+    if (errEl) { errEl.textContent = 'End date can\'t be before the start date.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  const { itemId, tab, entryIndex, selectEl } = _apCtx;
+
+  // Commit the "Yes" status now that we have dates.
+  selectEl.value = 'yes';
+  selectEl.className = `status-sel ${statusClass('yes')}`;
+  selectEl.dataset.prev = 'yes';
+  ensurePath(tab);
+  const key = entryIndex === 0 ? itemId : `${itemId}_e${entryIndex}`;
+  userChecklist[selectedCampaignId][tab][key] = {
+    ...(userChecklist[selectedCampaignId][tab][key] || {}), status: 'yes'
+  };
+
+  // Store the dates on the entry itself — this is what the admin dashboard
+  // reads to override this entry's compliance deadline (see the
+  // afterPartyDeadline lookup in loadAdminDashboardCache / getEntryBreakdown).
+  ensureEntries();
+  const entry = userChecklist[selectedCampaignId].entries[entryIndex];
+  entry.afterPartyStart = startVal;
+  entry.afterPartyEnd   = endVal;
+
+  // Surface the dates in the Notes column, right beside the Yes/No answer,
+  // same row, same entry.
+  const fmtApDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB') : '';
+  const noteText = `After Party: ${fmtApDate(startVal)} – ${fmtApDate(endVal)}`;
+  handleNoteChange(itemId, 'd1', entryIndex, noteText);
+  const noteInput = document.getElementById(`note-${itemId}-${entryIndex}`);
+  if (noteInput) noteInput.value = noteText;
+
+  closeAfterPartyModal(false);
+  updateUserProgress();
+  saveChecklist();
+}
+
+// Clears a previously-set after-party date override on one entry (called
+// when the "yesno" answer is changed away from "Yes").
+function clearAfterPartyOverride(entryIndex) {
+  ensureEntries();
+  const entry = userChecklist[selectedCampaignId].entries[entryIndex];
+  if (entry) { delete entry.afterPartyStart; delete entry.afterPartyEnd; }
 }
 
 function handleNoteChange(itemId, tab, entryIndex, note) {
