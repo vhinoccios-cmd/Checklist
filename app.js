@@ -5117,8 +5117,6 @@ async function renderDataTab() {
     console.error('Error loading checklists:', e);
     if (clEl) clEl.innerHTML = '<div class="data-empty">Error loading checklist data.</div>';
   }
-  // ── RSP & Kit Checking list ──
-  await renderRspKitList('all');
 }
 
 // ── Data tab: toggle team lead compliance dashboard ──────────
