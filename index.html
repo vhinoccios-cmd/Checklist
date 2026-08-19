@@ -289,7 +289,7 @@
               <span class="data-card-icon">📦</span>
               <div>
                 <div class="data-card-title">RSP &amp; Kit Checking</div>
-                <div class="data-card-sub">Send task checks and view member responses</div>
+                <div class="data-card-sub">Send, edit, and view member responses to task checks</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;">
                 <button class="rsp-filter-btn active" data-filter="all" onclick="filterRspKitList(this,'all')">All</button>
@@ -433,9 +433,9 @@
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span class="nav-label">Calendar</span>
         </button>
-        <button class="nav-item" id="user-navbtn-checklist" onclick="showUserTab('checklist')" title="Checklist">
+        <button class="nav-item" id="user-navbtn-checklist" onclick="showUserTab('checklist')" title="To Do List">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>
-          <span class="nav-label">Checklist</span>
+          <span class="nav-label">To Do List</span>
         </button>
         <button class="nav-item" id="user-navbtn-broadcasts" onclick="openBroadcastFeed()" title="Messages" style="position:relative;">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M16 3L4 8v4l12 5V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 10h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -498,8 +498,8 @@
       <div id="user-checklist-view" style="display:none;">
         <div class="page-header">
           <div>
-            <h1 class="page-title" id="user-campaign-name">Checklist</h1>
-            <p class="page-sub" id="user-campaign-sub">Select a campaign to begin</p>
+            <h1 class="page-title" id="user-campaign-name">To Do List</h1>
+            <p class="page-sub" id="user-campaign-sub">Select a campaign to see your checklist, RSP &amp; Kit checks</p>
           </div>
           <div class="page-header-actions">
             <select id="user-campaign-select" onchange="loadUserChecklist()" style="max-width:280px;">
@@ -514,7 +514,7 @@
         <div id="user-rspkit-banner" style="display:none;margin-bottom:16px;"></div>
         <div id="user-no-campaign" class="empty-state">
           <div class="empty-icon">📋</div>
-          <p>Select a campaign above to start your checklist.</p>
+          <p>Select a campaign above to see your to-do list — checklist, RSP &amp; Kit checks.</p>
         </div>
         <div id="user-checklist" style="display:none;"></div>
       </div>
@@ -1271,8 +1271,8 @@
     <div class="modal" style="max-width:560px;">
       <div class="modal-header">
         <div>
-          <h3>📦 Send Task Check</h3>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Members will see this as an interactive checklist they can update their status on.</div>
+          <h3 id="taskcheck-modal-title">📦 Send Task Check</h3>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="taskcheck-modal-subtitle">Members will see this as an interactive checklist they can update their status on.</div>
         </div>
         <button class="btn-ghost-light" onclick="closeTaskCheckModal()">✕</button>
       </div>
@@ -1314,7 +1314,7 @@
       <div id="tc-error" class="error-msg" style="display:none;"></div>
       <div class="modal-actions">
         <button class="btn-ghost-light" onclick="closeTaskCheckModal()">Cancel</button>
-        <button class="btn-primary" style="width:auto;background:#0F766E;" onclick="sendTaskCheck()">📦 Send Task Check</button>
+        <button class="btn-primary" id="taskcheck-save-btn" style="width:auto;background:#0F766E;" onclick="sendTaskCheck()">📦 Send Task Check</button>
       </div>
     </div>
   </div>
@@ -1365,9 +1365,9 @@
       </div>
 
       <nav class="sidebar-nav">
-        <button class="nav-item active" id="tl-navbtn-dashboard" onclick="showTlTab('dashboard')" title="My Team">
+        <button class="nav-item active" id="tl-navbtn-dashboard" onclick="showTlTab('dashboard')" title="Dashboard">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
-          <span class="nav-label">My Team</span>
+          <span class="nav-label">Dashboard</span>
         </button>
         <button class="nav-item" id="tl-navbtn-calendar" onclick="showTlTab('calendar')" title="Calendar">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1414,11 +1414,11 @@
     </aside>
 
     <main class="app-main" id="tl-main">
-      <!-- My Team (dashboard / overview) view -->
+      <!-- Dashboard (team overview) view -->
       <div id="tl-dashboard-view" style="display:block;">
         <div class="page-header">
           <div>
-            <h1 class="page-title">My Team</h1>
+            <h1 class="page-title">Dashboard</h1>
             <p class="page-sub" id="tl-dashboard-campaign-label">Checklist progress for your assigned members</p>
           </div>
           <button class="btn-outline-dark" onclick="loadTeamLeadView()">

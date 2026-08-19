@@ -5286,6 +5286,7 @@ async function renderRspKitList(filter, forceReload) {
           <div class="data-row-sub">${dt}</div>
         </div>
         <button class="btn-ghost-light btn-sm" onclick="openTaskCheckTrackerGroup(${regKey})">View All</button>
+        <button class="btn-ghost-light btn-sm admin-only" style="color:#0F766E;border-color:#5EEAD4;" onclick="openEditTaskCheckGroup(${regKey})">✏️ Edit</button>
         <button class="btn-ghost-light btn-sm" style="color:#DC2626;border-color:#FCA5A5;" onclick="deleteTaskCheckGroup(${regKey})">🗑 Delete</button>
       </div>`;
     }
@@ -5311,6 +5312,198 @@ function openTaskCheckTrackerGroup(regKey) {
   const entry = _rspKitGroupRegistry[regKey];
   if (!entry) return;
   openTaskCheckTracker(entry.groupIds[0]);
+}
+
+// ── Admin: Edit an already-sent RSP & Kit Check group ──────────────────
+// Reuses the "Send Task Check" modal in an "edit" mode: pre-fills title,
+// items, campaign, targeted entries and member selection from the group's
+// existing docs, then repoints the Save button at saveTaskCheckEdit()
+// instead of sendTaskCheck() so nothing is duplicated.
+function openEditTaskCheckGroup(regKey) {
+  if (currentUser?.role !== 'admin') return; // admin-only, per RSP & Kit edit access
+  const entry = _rspKitGroupRegistry[regKey];
+  if (!entry) return;
+  openTaskCheckModalForEdit(entry.groupIds);
+}
+
+async function openTaskCheckModalForEdit(groupIds) {
+  const docs = _rspKitCheckData.filter(tc => groupIds.includes(tc.id));
+  if (!docs.length) return;
+  const rep = docs[0]; // representative doc for shared fields (title/items/campaign/entries)
+
+  _taskCheckItems = (rep.items || []).map(i => ({ ...i }));
+  renderTaskCheckItemsList();
+
+  // Populate campaigns dropdown, then select the group's campaign (if any)
+  const campSel = document.getElementById('tc-campaign-sel');
+  campSel.innerHTML = '<option value="">All campaigns</option>';
+  Object.values(campaigns).forEach(c => {
+    campSel.innerHTML += `<option value="${c.id}">${escHtml(c.name)}</option>`;
+  });
+  campSel.value = rep.campaignId || '';
+  campSel.onchange = function() {
+    const campName = this.options[this.selectedIndex].text;
+    const base = 'Kit & RSP Check';
+    document.getElementById('tc-title').value = this.value ? `${base} — ${campName}` : base;
+    tcLoadEntriesForCampaign(this.value);
+  };
+
+  // Populate member chips, pre-selecting whoever this group currently targets.
+  // A group with a doc that has no targetUid means it was sent to "All
+  // members" — leave every chip unselected, matching the create-flow
+  // convention where an empty selection means "everyone".
+  const wasSentToAll = docs.some(d => !d.targetUid);
+  const targetedUids = docs.filter(d => d.targetUid).map(d => d.targetUid);
+  const chipWrap = document.getElementById('tc-member-chips');
+  const nonAdmins = Object.values(members).filter(m => m.role !== 'admin');
+  chipWrap.innerHTML = nonAdmins.length === 0
+    ? '<div style="color:var(--text-muted);font-size:13px;">No members yet.</div>'
+    : nonAdmins.map(m =>
+        `<div class="member-chip${(!wasSentToAll && targetedUids.includes(m.uid)) ? ' selected' : ''}" data-uid="${m.uid}" onclick="toggleChip(this)" title="@${escHtml(m.username)}">${escHtml(m.name || m.username)}</div>`
+      ).join('');
+  const saBtn = document.getElementById('tc-select-all-btn');
+  if (saBtn) saBtn.textContent = 'Select All';
+
+  document.getElementById('tc-title').value = rep.title;
+  document.getElementById('tc-error').style.display = 'none';
+
+  // Entry targeting (brand/platform/region), if this group's campaign has any
+  _tcSelectedEntries = rep.entries || [];
+  const entriesField = document.getElementById('tc-entries-field');
+  if (rep.campaignId) {
+    await tcLoadEntriesForCampaign(rep.campaignId);
+    document.querySelectorAll('#tc-entries-chips .member-chip').forEach(chip => {
+      const match = _tcSelectedEntries.some(e =>
+        (e.brand || '') === (chip.dataset.brand || '') &&
+        (e.platform || '') === (chip.dataset.platform || '') &&
+        (e.region || '') === (chip.dataset.region || ''));
+      if (match) chip.classList.add('selected');
+    });
+  } else if (entriesField) {
+    entriesField.style.display = 'none';
+  }
+
+  // Switch the modal chrome into "edit" mode
+  const overlay = document.getElementById('taskcheck-overlay');
+  overlay.dataset.editGroupIds = JSON.stringify(groupIds);
+  const titleEl = document.getElementById('taskcheck-modal-title');
+  if (titleEl) titleEl.textContent = '✏️ Edit Task Check';
+  const subtitleEl = document.getElementById('taskcheck-modal-subtitle');
+  if (subtitleEl) subtitleEl.textContent = 'Update the title, items, or who this check is sent to. Members who keep their assignment keep their existing progress.';
+  const saveBtn = document.getElementById('taskcheck-save-btn');
+  if (saveBtn) { saveBtn.textContent = '💾 Save Changes'; saveBtn.setAttribute('onclick', 'saveTaskCheckEdit()'); }
+
+  overlay.style.display = 'flex';
+}
+
+// Saves edits to an existing RSP & Kit Check group. Members who remain
+// targeted keep their existing taskCheckResponses (so in-progress/done
+// status isn't lost just because the admin tweaked the title or added an
+// item); members removed from targeting have their doc + responses
+// deleted, and newly-added members get a fresh doc + notification, the
+// same way a brand-new send works.
+async function saveTaskCheckEdit() {
+  const overlay = document.getElementById('taskcheck-overlay');
+  const groupIds = JSON.parse(overlay.dataset.editGroupIds || '[]');
+  const errEl = document.getElementById('tc-error');
+  errEl.style.display = 'none';
+  if (!groupIds.length) return;
+
+  const title  = document.getElementById('tc-title').value.trim();
+  const campId = document.getElementById('tc-campaign-sel').value;
+  if (!title) { showError(errEl, 'Please enter a title.'); return; }
+  const validItems = _taskCheckItems.filter(i => i.label.trim());
+  if (validItems.length === 0) { showError(errEl, 'Please add at least one check item.'); return; }
+
+  const selectedChips = [...document.querySelectorAll('#tc-member-chips .member-chip.selected')];
+  const selectedUids  = selectedChips.map(c => c.dataset.uid);
+  const sendToAll     = selectedUids.length === 0;
+  const campName      = campId ? campaigns[campId]?.name : null;
+  const targetEntries = campId ? _tcSelectedEntries : [];
+  const commonFields  = { title, items: validItems, campaignId: campId || null, campaignName: campName || null, entries: targetEntries };
+
+  const saveBtn = document.getElementById('taskcheck-save-btn');
+  const prevLabel = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) { saveBtn.textContent = 'Saving…'; saveBtn.disabled = true; }
+
+  try {
+    const docs      = _rspKitCheckData.filter(tc => groupIds.includes(tc.id));
+    const batchId   = docs.find(d => d.batchId)?.batchId || `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const wasAll    = docs.some(d => !d.targetUid);
+
+    async function addMemberDoc(uid) {
+      const m = members[uid];
+      if (!m) return;
+      const memberName = m.name || m.username;
+      const ref = await db.collection('taskChecks').add({
+        ...commonFields, sentAt: new Date().toISOString(), sentBy: 'Admin',
+        targetUid: uid, targetName: memberName, batchId,
+      });
+      await db.collection('broadcasts').add({
+        type: 'taskcheck',
+        message: `📦 Task Check updated: "${title}" — please review and update your status.`,
+        targetUid: uid, targetName: memberName,
+        campaignId: campId || null, campaignName: campName || null,
+        sentAt: new Date().toISOString(), sentBy: 'Admin', readBy: [],
+        taskCheckId: ref.id,
+      });
+    }
+
+    async function removeMemberDoc(docId) {
+      const respSnap = await db.collection('taskCheckResponses').doc(docId).collection('responses').get();
+      for (const r of respSnap.docs) await r.ref.delete();
+      await db.collection('taskCheckResponses').doc(docId).delete().catch(() => {});
+      await db.collection('taskChecks').doc(docId).delete();
+    }
+
+    if (wasAll && sendToAll) {
+      // Still targeting everyone — just update the single shared doc.
+      const allDoc = docs.find(d => !d.targetUid);
+      await db.collection('taskChecks').doc(allDoc.id).update(commonFields);
+    } else if (!wasAll && !sendToAll) {
+      // Per-member before and after — diff the membership.
+      const existingUidToDoc = {};
+      docs.forEach(d => { if (d.targetUid) existingUidToDoc[d.targetUid] = d; });
+      const existingUids = Object.keys(existingUidToDoc);
+      const toRemove = existingUids.filter(u => !selectedUids.includes(u));
+      const toAdd    = selectedUids.filter(u => !existingUids.includes(u));
+      const toKeep   = existingUids.filter(u => selectedUids.includes(u));
+
+      for (const uid of toKeep)   await db.collection('taskChecks').doc(existingUidToDoc[uid].id).update(commonFields);
+      for (const uid of toRemove) await removeMemberDoc(existingUidToDoc[uid].id);
+      for (const uid of toAdd)    await addMemberDoc(uid);
+    } else if (wasAll && !sendToAll) {
+      // Switching from "All members" to specific members.
+      const allDoc = docs.find(d => !d.targetUid);
+      await removeMemberDoc(allDoc.id);
+      for (const uid of selectedUids) await addMemberDoc(uid);
+    } else {
+      // Switching from specific members to "All members".
+      for (const d of docs) { if (d.targetUid) await removeMemberDoc(d.id); }
+      const ref = await db.collection('taskChecks').add({
+        ...commonFields, sentAt: new Date().toISOString(), sentBy: 'Admin',
+        targetUid: null, targetName: 'All members',
+      });
+      await db.collection('broadcasts').add({
+        type: 'taskcheck',
+        message: `📦 Task Check updated: "${title}" — please review and update your status.`,
+        targetUid: null, targetName: 'All members',
+        campaignId: campId || null, campaignName: campName || null,
+        sentAt: new Date().toISOString(), sentBy: 'Admin', readBy: [],
+        taskCheckId: ref.id,
+      });
+    }
+
+    showToast(`✅ Task Check "${title}" updated.`, 'success');
+    overlay.style.display = 'none';
+    delete overlay.dataset.editGroupIds;
+    renderRspKitList(_rspKitActiveFilter, true);
+  } catch (e) {
+    showError(errEl, 'Failed to save changes.');
+    console.error(e);
+  } finally {
+    if (saveBtn) { saveBtn.textContent = prevLabel || '💾 Save Changes'; saveBtn.disabled = false; }
+  }
 }
 
 // Deletes every taskCheck doc (+ responses + linked broadcast) in a group
@@ -6002,7 +6195,7 @@ function escHtml(str) {
 // Used anywhere a campaign's key dates should be surfaced: the member
 // "My Checklist" overview cards, the actual Checklist tab header (for
 // members, team leads, and admins alike), the admin Dashboard header,
-// and the team lead "My Team" header — so the two dates always read the
+// and the team lead "Dashboard" header — so the two dates always read the
 // same way everywhere instead of drifting into one-off formats.
 function campDateMetaHtml(camp) {
   if (!camp) return '';
@@ -9033,6 +9226,16 @@ const RSP_STATUS_CLASS = { done: 'rv-done', 'in-progress': 'rv-progress', pendin
 
 // ── Admin: Open "Send Task Check" modal ──────────────────────
 function openTaskCheckModal() {
+  // Make sure we're in "create" mode, not left over from an Edit flow
+  const overlay = document.getElementById('taskcheck-overlay');
+  if (overlay) delete overlay.dataset.editGroupIds;
+  const titleEl = document.getElementById('taskcheck-modal-title');
+  if (titleEl) titleEl.textContent = '📦 Send Task Check';
+  const subtitleEl = document.getElementById('taskcheck-modal-subtitle');
+  if (subtitleEl) subtitleEl.textContent = 'Members will see this as an interactive checklist they can update their status on.';
+  const saveBtn = document.getElementById('taskcheck-save-btn');
+  if (saveBtn) { saveBtn.textContent = '📦 Send Task Check'; saveBtn.setAttribute('onclick', 'sendTaskCheck()'); }
+
   // Reset items to defaults
   _taskCheckItems = DEFAULT_TASK_CHECK_ITEMS.map(i => ({ ...i }));
   renderTaskCheckItemsList();
@@ -10011,7 +10214,7 @@ async function renderTeamLeadView() {
   filterTlProgressTable();
 }
 
-// ── Status filter for team-lead "My Team" progress table ──────
+// ── Status filter for team-lead "Dashboard" progress table ──────
 let _tlStatusFilter = 'all';
 
 function filterTlByStatus(btn, status) {
@@ -10041,7 +10244,7 @@ function filterTlProgressTable() {
   });
 }
 
-// Jump from the "My Team" dashboard straight into a specific campaign on the Checklist tab
+// Jump from the "Dashboard" straight into a specific campaign on the Checklist tab
 function switchToTlChecklistTab(campId) {
   selectedCampaignId = campId;
   showTlTab('checklist');
@@ -10050,7 +10253,7 @@ function switchToTlChecklistTab(campId) {
 // Open the existing review modal in read-only mode for team leads
 async function openTlReviewModal(uid, campId) {
   // Merge tl data into global maps so openReviewModal can find them.
-  // Also include the team lead's own record — rows in "My Team" can be
+  // Also include the team lead's own record — rows in "Dashboard" can be
   // the lead's own checklist (the "You" row), and without this, clicking
   // Review on that row throws (members[uid] is undefined) and silently
   // fails because the lead's own uid is never in tlMembers (tlMembers is
